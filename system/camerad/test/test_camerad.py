@@ -16,6 +16,7 @@ SYNC_STARTUP_SKIP = 5
 MAX_TEST_TIME = 25
 DRIVER_STAGGER_RANGE_MS = (20, 30)
 SYNCED_OFFSET_TOLERANCE_MS = 1.1
+OS04_DRIVER_STAGGER_MS = 25.0
 
 
 def _numpy_rgb2gray(im):
@@ -127,18 +128,22 @@ class TestCamerad:
     assert len(laggy_frames) == 0, f"Frames not synced properly: {laggy_frames=}"
 
     driver_sensor = set(logs['driverCameraState']['sensor'])
-    driver_expected_offset_ms = 1000.0 / SERVICE_LIST['driverCameraState'].frequency if driver_sensor == {'os04c10'} else None
+    driver_expected_offsets_ms = (
+      (OS04_DRIVER_STAGGER_MS, 1000.0 / SERVICE_LIST['driverCameraState'].frequency)
+      if driver_sensor == {'os04c10'} else None
+    )
 
     # OX03 driver camera should be staggered ~25ms from road camera. OS04 driver
-    # frames are one 20Hz period offset while road/wide remain tightly synced.
+    # frames can align at either the staggered phase or one 20Hz period offset
+    # while road/wide remain tightly synced.
     for i in n:
       offset_ms = abs(logs['driverCameraState']['timestampSof'][i] - logs['roadCameraState']['timestampSof'][i]) / 1e6
-      if driver_expected_offset_ms is None:
+      if driver_expected_offsets_ms is None:
         lo, hi = DRIVER_STAGGER_RANGE_MS
         assert lo < offset_ms < hi, f"driver camera stagger out of range at frame {i}: {offset_ms:.1f}ms (expected ~25ms)"
       else:
-        assert abs(offset_ms - driver_expected_offset_ms) < SYNCED_OFFSET_TOLERANCE_MS, \
-          f"driver camera offset out of range at frame {i}: {offset_ms:.1f}ms (expected ~{driver_expected_offset_ms:.1f}ms)"
+        assert any(abs(offset_ms - expected) < SYNCED_OFFSET_TOLERANCE_MS for expected in driver_expected_offsets_ms), \
+          f"driver camera offset out of range at frame {i}: {offset_ms:.1f}ms (expected one of {driver_expected_offsets_ms})"
 
   def test_sanity_checks(self, logs):
     self._sanity_checks(logs)
