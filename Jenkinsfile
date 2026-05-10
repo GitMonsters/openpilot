@@ -266,8 +266,10 @@ snapshot_dma() {
 }
 
 run_ui_once() {
-  terminate="$1"
-  python - "$terminate" <<'PY'
+  mode="$1"
+  python - "$mode" <<'PY'
+import atexit
+import os
 import sys
 import time
 
@@ -275,7 +277,7 @@ import pyray as rl
 
 from openpilot.system.ui.lib.application import gui_app
 
-terminate = sys.argv[1] == "1"
+mode = sys.argv[1]
 gui_app.init_window("ui-dmabuf-probe")
 for _ in range(5):
   rl.begin_drawing()
@@ -283,21 +285,28 @@ for _ in range(5):
   rl.draw_text("probe", 20, 20, 40, rl.WHITE)
   rl.end_drawing()
   time.sleep(0.05)
-gui_app.close()
-if terminate:
-  rl.glfw_terminate()
+
+if mode == "close":
+  gui_app.close()
+elif mode == "sys_exit_without_close":
+  atexit.unregister(gui_app.close)
+  sys.exit(0)
+elif mode == "os_exit_without_close":
+  os._exit(0)
+else:
+  raise ValueError(mode)
 PY
 }
 
 run_case() {
   name="$1"
-  terminate="$2"
+  mode="$2"
   snapshot_dma "${name}_before"
-  for i in 1 2 3 4 5; do
-    echo "==== UI CASE ${name} ITER ${i} terminate=${terminate} ===="
+  for i in 1 2 3; do
+    echo "==== UI CASE ${name} ITER ${i} mode=${mode} ===="
     cleanup_ui_probe
     rm -rf /dev/shm/*
-    run_ui_once "${terminate}"
+    run_ui_once "${mode}"
     cleanup_ui_probe
     sleep 2
     snapshot_dma "${name}_after_${i}"
@@ -305,8 +314,9 @@ run_case() {
 }
 
 snapshot_dma boot
-run_case close_only 0
-run_case close_then_glfw_terminate 1
+run_case sys_exit_without_close sys_exit_without_close
+run_case os_exit_without_close os_exit_without_close
+run_case close_only close
 ''', [timeout: 600]),
     ])
     return
