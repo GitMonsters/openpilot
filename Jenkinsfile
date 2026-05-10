@@ -10,7 +10,7 @@ def retryWithDelay(int maxRetries, int delay, Closure body) {
 }
 
 def TIZI_NEEDS_CAN = "tizi-needs-can-tmp"
-def TIZI_LSMC = "tizi-lsmc"
+def TIZI_LSMC = "comma-479c6f30"
 def TICI_OS04C10 = "comma-bb16a196"
 
 def device(String ip, String step_label, String cmd) {
