@@ -205,14 +205,15 @@ node {
       step("install fixed raylib", '''
 set -euo pipefail
 
-workdir=/tmp/raylib_dmabuf_fix
-rm -rf "${workdir}"
+workdir=/data/raylib_dmabuf_fix
+rm -rf /tmp/raylib_dmabuf_fix "${workdir}"
 mkdir -p "${workdir}/install" "${workdir}/include"
 
-git clone -b master --no-tags https://github.com/commaai/raylib.git "${workdir}/raylib_repo"
+git init "${workdir}/raylib_repo"
 cd "${workdir}/raylib_repo"
-git fetch origin faf6e4392780de7471504e43e70975efaba07e95
-git reset --hard faf6e4392780de7471504e43e70975efaba07e95
+git remote add origin https://github.com/commaai/raylib.git
+git fetch --depth 1 origin faf6e4392780de7471504e43e70975efaba07e95
+git checkout --detach FETCH_HEAD
 git clean -xdff .
 git apply <<'PATCH'
 diff --git a/src/platforms/rcore_comma.c b/src/platforms/rcore_comma.c
@@ -294,10 +295,11 @@ make -j$(nproc) PLATFORM=PLATFORM_COMMA RAYLIB_RELEASE_PATH="${workdir}/install"
 cp raylib.h raymath.h rlgl.h "${workdir}/include/"
 curl -fsSLo "${workdir}/include/raygui.h" https://raw.githubusercontent.com/raysan5/raygui/76b36b597edb70ffaf96f046076adc20d67e7827/src/raygui.h
 
-git clone -b master --no-tags https://github.com/commaai/raylib-python-cffi.git "${workdir}/raylib_python_repo"
+git init "${workdir}/raylib_python_repo"
 cd "${workdir}/raylib_python_repo"
-git fetch origin a0710d95af3c12fd7f4b639589be9a13dad93cb6
-git reset --hard a0710d95af3c12fd7f4b639589be9a13dad93cb6
+git remote add origin https://github.com/commaai/raylib-python-cffi.git
+git fetch --depth 1 origin a0710d95af3c12fd7f4b639589be9a13dad93cb6
+git checkout --detach FETCH_HEAD
 git clean -xdff .
 RAYLIB_PLATFORM=PLATFORM_COMMA RAYLIB_INCLUDE_PATH="${workdir}/include" RAYLIB_LIB_PATH="${workdir}/install" python setup.py bdist_wheel
 python -m pip install --force-reinstall --no-deps dist/raylib-*.whl
