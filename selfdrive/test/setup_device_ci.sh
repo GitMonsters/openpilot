@@ -21,6 +21,15 @@ fi
 # prevent storage from filling up
 rm -rf /data/media/0/realdata/*
 
+# aborted Jenkins jobs can leave hardware tests running after the lock is released
+pkill -INT -f "/usr/local/venv/bin/pytest" || true
+pkill -INT -f "system/manager/manager.py" || true
+sudo pkill -INT -x camerad || true
+sleep 1
+pkill -KILL -f "/usr/local/venv/bin/pytest" || true
+pkill -KILL -f "system/manager/manager.py" || true
+sudo pkill -KILL -x camerad || true
+
 rm -rf /data/safe_staging/ || true
 if [ -d /data/safe_staging/ ]; then
   sudo umount /data/safe_staging/merged/ || true

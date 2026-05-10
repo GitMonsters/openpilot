@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import fcntl
 import os
 import sys
 import signal
@@ -85,26 +86,59 @@ def try_setup_logs(diag, logs):
   return setup_logs(diag, logs)
 
 AT_PORT = "/dev/modem_at0"
+AT_LOCK = "/dev/shm/modem.lock"  # shared with modem.py and LPA
 
 @retry(attempts=5, delay=1.0)
 def at_cmd(cmd: str) -> str:
-  with Serial(AT_PORT, baudrate=115200, timeout=5) as ser:
-    ser.reset_input_buffer()
-    ser.write(f"{cmd}\r".encode())
-    lines = []
-    while True:
-      line = ser.readline()
-      if not line:
-        raise RuntimeError(f"AT command timeout: {cmd}")
-      line = line.decode('utf-8', errors='replace').strip()
-      if line in ("OK", "ERROR") or line.startswith("+CME ERROR"):
-        break
-      if line and line != cmd:
-        lines.append(line)
-  return '\n'.join(lines)
+  fd = os.open(AT_LOCK, os.O_CREAT | os.O_RDWR, 0o666)
+  try:
+    fcntl.flock(fd, fcntl.LOCK_EX)
+    with Serial(AT_PORT, baudrate=115200, timeout=5) as ser:
+      ser.reset_input_buffer()
+      ser.write(f"{cmd}\r".encode())
+      lines = []
+      while True:
+        line = ser.readline()
+        if not line:
+          raise RuntimeError(f"AT command timeout: {cmd}")
+        line = line.decode('utf-8', errors='replace').strip()
+        if line in ("OK", "ERROR") or line.startswith("+CME ERROR"):
+          break
+        if line and line != cmd:
+          lines.append(line)
+    return '\n'.join(lines)
+  finally:
+    os.close(fd)
 
 def gps_enabled() -> bool:
   return "QGPS: 1" in at_cmd("AT+QGPS?")
+
+
+def stop_gnss(timeout: float = 5.0, settle_time: float = 1.0) -> bool:
+  end = time.monotonic() + timeout
+  off_since = None
+  last_resp = ""
+
+  while time.monotonic() < end:
+    try:
+      at_cmd("AT+QGPSEND")
+      last_resp = at_cmd("AT+QGPS?")
+      now = time.monotonic()
+      if "+QGPS: 0" in last_resp:
+        off_since = off_since or now
+        if now - off_since >= settle_time:
+          return True
+      else:
+        off_since = None
+    except Exception as e:
+      last_resp = str(e)
+      off_since = None
+
+    time.sleep(0.25)
+
+  cloudlog.warning(f"GNSS did not stop cleanly: {last_resp}")
+  return False
+
 
 @retry(attempts=5, delay=1.0)
 def setup_quectel(diag: ModemDiag):
@@ -119,7 +153,7 @@ def setup_quectel(diag: ModemDiag):
   try_setup_logs(diag, LOG_TYPES)
 
   if gps_enabled():
-    at_cmd("AT+QGPSEND")
+    stop_gnss()
 
   # disable DPO power savings for more accuracy
   at_cmd("AT+QGPSCFG=\"dpoenable\",0")
@@ -153,11 +187,16 @@ def setup_quectel(diag: ModemDiag):
   ))
 
 
-def teardown_quectel(diag):
-  at_cmd("AT+QGPSCFG=\"outport\",\"none\"")
-  if gps_enabled():
-    at_cmd("AT+QGPSEND")
-  try_setup_logs(diag, [])
+def teardown_quectel(diag: ModemDiag | None = None):
+  try:
+    at_cmd("AT+QGPSCFG=\"outport\",\"none\"")
+  except Exception as e:
+    cloudlog.warning(f"failed to disable GNSS output port: {e}")
+
+  stop_gnss()
+
+  if diag is not None:
+    try_setup_logs(diag, [])
 
 
 def wait_for_modem():
@@ -191,16 +230,14 @@ def main() -> NoReturn:
   unpack_position, _ = dict_unpacker(position_report)
 
   wait_for_modem()
+  diag = None
 
   def cleanup(sig, frame):
     cloudlog.warning("caught sig disabling quectel gps")
 
     gpio_set(GPIO.GNSS_PWR_EN, False)
-    try:
-      teardown_quectel(diag)
-      cloudlog.warning("quectel cleanup done")
-    except NameError:
-      cloudlog.warning('quectel not yet setup')
+    teardown_quectel(diag)
+    cloudlog.warning("quectel cleanup done")
 
     sys.exit(0)
   signal.signal(signal.SIGINT, cleanup)

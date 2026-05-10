@@ -3,7 +3,7 @@ import pytest
 import time
 
 import cereal.messaging as messaging
-from openpilot.system.qcomgpsd.qcomgpsd import at_cmd, wait_for_modem
+from openpilot.system.qcomgpsd.qcomgpsd import gps_enabled, wait_for_modem
 from openpilot.system.manager.process_config import managed_processes
 
 
@@ -46,6 +46,4 @@ class TestQcomgpsd:
         time.sleep(s)
         managed_processes['qcomgpsd'].stop()
 
-        wait_for_modem()
-        resp = at_cmd("AT+QGPS?")
-        assert "+QGPS: 0" in resp
+        assert not gps_enabled()

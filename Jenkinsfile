@@ -9,6 +9,9 @@ def retryWithDelay(int maxRetries, int delay, Closure body) {
   throw Exception("Failed after ${maxRetries} retries")
 }
 
+def TIZI_NEEDS_CAN = "tizi-needs-can-tmp"
+def TIZI_LSMC = "comma-ff542eb7"
+
 def device(String ip, String step_label, String cmd) {
   withCredentials([file(credentialsId: 'id_rsa', variable: 'key_file')]) {
     def ssh_cmd = """
@@ -73,6 +76,19 @@ END"""
   }
 }
 
+def rebootDevice(String ip) {
+  withCredentials([file(credentialsId: 'id_rsa', variable: 'key_file')]) {
+    sh returnStatus: true, script: """
+ssh -o ConnectTimeout=5 -o ServerAliveInterval=5 -o ServerAliveCountMax=1 -o BatchMode=yes -o StrictHostKeyChecking=no -i ${key_file} 'comma@${ip}' 'sudo reboot'
+"""
+  }
+
+  sleep(20)
+  retryWithDelay(24, 5) {
+    device(ip, "wait for reboot", "true")
+  }
+}
+
 def deviceStage(String stageName, String deviceType, List extra_env, def steps) {
   stage(stageName) {
     if (currentBuild.result != null) {
@@ -87,9 +103,17 @@ def deviceStage(String stageName, String deviceType, List extra_env, def steps) 
     def branch = env.BRANCH_NAME ?: 'master';
     def gitDiff = sh returnStdout: true, script: 'curl -s -H "Authorization: Bearer ${GITHUB_COMMENTS_TOKEN}" https://api.github.com/repos/commaai/openpilot/compare/master...${GIT_BRANCH} | jq .files[].filename || echo "/"', label: 'Getting changes'
 
-    lock(resource: "", label: deviceType, inversePrecedence: true, variable: 'device_ip', quantity: 1, resourceSelectStrategy: 'random') {
+    def lockOptions = deviceType.startsWith("comma-") ?
+      [resource: deviceType, inversePrecedence: true, variable: 'device_ip'] :
+      [resource: "", label: deviceType, inversePrecedence: true, variable: 'device_ip', quantity: 1, resourceSelectStrategy: 'random']
+
+    lock(lockOptions) {
       docker.image('ghcr.io/commaai/alpine-ssh').inside('--user=root') {
         timeout(time: 35, unit: 'MINUTES') {
+          if (deviceType == "tizi-needs-can-tmp") {
+            rebootDevice(device_ip)
+          }
+
           retry (3) {
             def date = sh(script: 'date', returnStdout: true).trim();
             device(device_ip, "set time", "date -s '" + date + "'")
@@ -178,7 +202,7 @@ node {
 
   try {
     if (env.BRANCH_NAME == 'devel-staging') {
-      deviceStage("build release-tizi-staging", "tizi-needs-can", [], [
+      deviceStage("build release-tizi-staging", TIZI_NEEDS_CAN, [], [
         step("build release-tizi-staging", "RELEASE_BRANCH=release-tizi-staging $SOURCE_DIR/release/build_release.sh && git push -f origin release-tizi-staging:release-mici-staging"),
       ])
     }
@@ -186,12 +210,12 @@ node {
     if (env.BRANCH_NAME == '__nightly') {
       parallel (
         'nightly': {
-          deviceStage("build nightly", "tizi-needs-can", [], [
+          deviceStage("build nightly", TIZI_NEEDS_CAN, [], [
             step("build nightly", "RELEASE_BRANCH=nightly $SOURCE_DIR/release/build_release.sh"),
           ])
         },
         'nightly-dev': {
-          deviceStage("build nightly-dev", "tizi-needs-can", [], [
+          deviceStage("build nightly-dev", TIZI_NEEDS_CAN, [], [
             step("build nightly-dev", "PANDA_DEBUG_BUILD=1 RELEASE_BRANCH=nightly-dev $SOURCE_DIR/release/build_release.sh"),
           ])
         },
@@ -201,7 +225,7 @@ node {
     if (!env.BRANCH_NAME.matches(excludeRegex)) {
     parallel (
       'onroad tests': {
-        deviceStage("onroad", "tizi-needs-can", ["UNSAFE=1"], [
+        deviceStage("onroad", TIZI_NEEDS_CAN, ["UNSAFE=1"], [
           step("build openpilot", "cd system/manager && ./build.py"),
           step("check dirty", "release/check-dirty.sh"),
           step("onroad tests", "pytest selfdrive/test/test_onroad.py -s", [timeout: 60]),
@@ -230,7 +254,7 @@ node {
         ])
       },
       'sensord': {
-        deviceStage("LSM + MMC", "tizi-lsmc", ["UNSAFE=1"], [
+        deviceStage("LSM + MMC", TIZI_LSMC, ["UNSAFE=1"], [
           step("build", "cd system/manager && ./build.py"),
           step("test sensord", "pytest system/sensord/tests/test_sensord.py"),
         ])
