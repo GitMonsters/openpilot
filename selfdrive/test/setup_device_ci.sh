@@ -33,6 +33,24 @@ shrink_ion_system_heap() {
   fi
 }
 
+exclude_ci_launch_env() {
+  grep -qxF "/.ci_launch_env.sh" "$TEST_DIR/.git/info/exclude" || echo "/.ci_launch_env.sh" >> "$TEST_DIR/.git/info/exclude"
+}
+
+reset_ci_launch_env() {
+  exclude_ci_launch_env
+  rm -f "$TEST_DIR/.ci_launch_env.sh"
+}
+
+setup_vipc_buffer_count() {
+  if [ -z "${VIPC_BUFFER_COUNT:-}" ]; then
+    return
+  fi
+
+  exclude_ci_launch_env
+  printf "export VIPC_BUFFER_COUNT=%q\n" "$VIPC_BUFFER_COUNT" >> "$TEST_DIR/.ci_launch_env.sh"
+}
+
 # prevent storage from filling up
 rm -rf /data/media/0/realdata/*
 
@@ -182,7 +200,7 @@ setup_fixed_raylib() {
     echo "$stamp" > "${workdir}/stamp"
   fi
 
-  grep -qxF "/.ci_launch_env.sh" "$TEST_DIR/.git/info/exclude" || echo "/.ci_launch_env.sh" >> "$TEST_DIR/.git/info/exclude"
+  exclude_ci_launch_env
   cat > "$TEST_DIR/.ci_launch_env.sh" <<'EOF'
 export PYTHONPATH="/data/raylib_dmabuf_fix/site:${PYTHONPATH:-}"
 EOF
@@ -217,4 +235,6 @@ else
 fi
 
 echo "$TEST_DIR synced with $GIT_COMMIT, t=$SECONDS"
+reset_ci_launch_env
 setup_fixed_raylib
+setup_vipc_buffer_count
