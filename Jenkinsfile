@@ -305,6 +305,7 @@ PYTHONWARNINGS=default RAYLIB_PLATFORM=PLATFORM_COMMA RAYLIB_INCLUDE_PATH="${wor
 rm -rf "${workdir}/site"
 mkdir -p "${workdir}/site"
 python -m zipfile -e dist/raylib-*.whl "${workdir}/site"
+cd /data/openpilot
 PYTHONPATH="${workdir}/site:${PYTHONPATH:-}" python - <<'PY'
 import pyray as rl
 print("installed raylib:", rl.RAYLIB_VERSION)
