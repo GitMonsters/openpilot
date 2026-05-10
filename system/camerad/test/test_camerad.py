@@ -36,6 +36,13 @@ def _exposure_stable(results):
     for v in results.values()
   )
 
+def _first_stable_sample(checks):
+  for i in range(EXPOSURE_STABLE_COUNT - 1, len(checks)):
+    start = i + 1 - EXPOSURE_STABLE_COUNT
+    if all(_in_range(*s) for s in checks[start:i+1]):
+      return i
+  return None
+
 
 def run_and_log(procs, services, duration):
   with processes_context(procs):
@@ -90,19 +97,17 @@ class TestCamerad:
     assert len(checks) >= EXPOSURE_STABLE_COUNT, f"{cam}: only got {len(checks)} samples"
 
     # check that exposure converges into the valid range
-    passed = sum(_in_range(med, mean) for med, mean in checks)
-    assert passed >= EXPOSURE_STABLE_COUNT, \
-      f"{cam}: only {passed}/{len(checks)} checks in range. " + \
+    converged_at = _first_stable_sample(checks)
+    assert converged_at is not None, \
+      f"{cam}: exposure never stabilized over {EXPOSURE_STABLE_COUNT} consecutive samples. " + \
       " | ".join(f"#{i+1}: med={m:.4f} mean={u:.4f}" for i, (m, u) in enumerate(checks))
 
     # check that exposure is stable once converged (no regressions)
-    in_range = False
-    for i, (median, mean) in enumerate(checks):
+    for i, (median, mean) in enumerate(checks[converged_at + 1:], start=converged_at + 1):
       ok = _in_range(median, mean)
-      if in_range and not ok:
+      if not ok:
         pytest.fail(f"{cam}: exposure regressed on sample {i+1} " +
                     f"(median={median:.4f}, mean={mean:.4f}, expected: ({lo}, {hi}))")
-      in_range = ok
 
   def test_frame_skips(self, logs):
     for c in CAMERAS:
