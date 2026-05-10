@@ -3,6 +3,7 @@ set -e
 
 YELLOW='\033[0;33m'
 GREEN='\033[0;32m'
+RED='\033[0;31m'
 UNDERLINE='\033[4m'
 BOLD='\033[1m'
 NC='\033[0m'
@@ -70,8 +71,14 @@ function loop() {
             echo -e "Build $i: ${YELLOW}still running${NC}"
             continue
           else
-            count=$((count+1))
-            echo -e "Build $i: ${GREEN}done${NC}"
+            RESULT=$(echo $JSON | jq -r '.result // "UNKNOWN"')
+            if [[ $RESULT == "SUCCESS" ]]; then
+              count=$((count+1))
+              echo -e "Build $i: ${GREEN}done${NC}"
+            else
+              echo -e "Build $i: ${RED}${RESULT}${NC}"
+              exit 1
+            fi
           fi
         else
           echo "No status for build $i"
