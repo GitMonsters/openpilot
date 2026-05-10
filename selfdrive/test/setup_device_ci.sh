@@ -59,6 +59,8 @@ cleanup_openpilot_processes() {
   local python_patterns=(
     "/usr/local/venv/bin/pytest"
     "system/manager/manager.py"
+    "system.athena.manage_athenad"
+    "system.athena.athenad"
     "tools.webcam.camerad"
     "system.proclogd"
     "system.journald"
