@@ -302,14 +302,17 @@ git fetch --depth 1 origin a0710d95af3c12fd7f4b639589be9a13dad93cb6
 git checkout --detach FETCH_HEAD
 git clean -xdff .
 PYTHONWARNINGS=default RAYLIB_PLATFORM=PLATFORM_COMMA RAYLIB_INCLUDE_PATH="${workdir}/include" RAYLIB_LIB_PATH="${workdir}/install" python setup.py bdist_wheel
-python -m pip install --force-reinstall --no-deps dist/raylib-*.whl
-python - <<'PY'
+rm -rf "${workdir}/site"
+mkdir -p "${workdir}/site"
+python -m zipfile -e dist/raylib-*.whl "${workdir}/site"
+PYTHONPATH="${workdir}/site:${PYTHONPATH:-}" python - <<'PY'
 import pyray as rl
 print("installed raylib:", rl.RAYLIB_VERSION)
 PY
 ''', [timeout: 900]),
       step("ui dma-buf probe", '''
 set -euo pipefail
+export PYTHONPATH="/data/raylib_dmabuf_fix/site:${PYTHONPATH:-}"
 
 cleanup_ui_probe() {
   pkill -INT -f "ui-dmabuf-probe" || true
