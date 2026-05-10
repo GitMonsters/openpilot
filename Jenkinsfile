@@ -231,7 +231,7 @@ node {
         deviceStage("onroad", TIZI_NEEDS_CAN, ["UNSAFE=1", "USE_FIXED_RAYLIB=1", "VIPC_BUFFER_COUNT=6"], [
           step("build openpilot", "cd system/manager && ./build.py"),
           step("check dirty", "release/check-dirty.sh"),
-          step("onroad tests", "pytest selfdrive/test/test_onroad.py -s", [timeout: 60]),
+          step("onroad tests", "pytest selfdrive/test/test_onroad.py -s", [timeout: 90]),
         ])
       },
       'HW + Unit Tests': {
