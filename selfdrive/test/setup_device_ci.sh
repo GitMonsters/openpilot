@@ -51,17 +51,73 @@ setup_vipc_buffer_count() {
   printf "export VIPC_BUFFER_COUNT=%q\n" "$VIPC_BUFFER_COUNT" >> "$TEST_DIR/.ci_launch_env.sh"
 }
 
+cleanup_openpilot_processes() {
+  local signal="$1"
+  local native_procs=(
+    loggerd encoderd camerad pandad bridge
+  )
+  local python_patterns=(
+    "/usr/local/venv/bin/pytest"
+    "system/manager/manager.py"
+    "system.athena.manage_athenad"
+    "system.logmessaged"
+    "tools.webcam.camerad"
+    "system.proclogd"
+    "system.journald"
+    "system.micd"
+    "system.timed"
+    "selfdrive.modeld.modeld"
+    "selfdrive.modeld.dmonitoringmodeld"
+    "system.sensord.sensord"
+    "selfdrive.ui.ui"
+    "selfdrive.ui.soundd"
+    "selfdrive.locationd.locationd"
+    "selfdrive.locationd.calibrationd"
+    "selfdrive.locationd.torqued"
+    "selfdrive.controls.controlsd"
+    "tools.joystick.joystickd"
+    "selfdrive.selfdrived.selfdrived"
+    "selfdrive.car.card"
+    "system.loggerd.deleter"
+    "selfdrive.monitoring.dmonitoringd"
+    "system.qcomgpsd.qcomgpsd"
+    "selfdrive.pandad.pandad"
+    "selfdrive.locationd.paramsd"
+    "selfdrive.locationd.lagd"
+    "system.ubloxd.ubloxd"
+    "system.ubloxd.pigeond"
+    "selfdrive.controls.plannerd"
+    "tools.longitudinal_maneuvers.maneuversd"
+    "tools.lateral_maneuvers.lateral_maneuversd"
+    "selfdrive.controls.radard"
+    "system.hardware.hardwared"
+    "system.hardware.tici.modem"
+    "system.tombstoned"
+    "system.updated.updated"
+    "system.loggerd.uploader"
+    "system.statsd"
+    "selfdrive.ui.feedback.feedbackd"
+    "system.webrtc.webrtcd"
+    "tools.bodyteleop.web"
+    "tools.joystick.joystick_control"
+  )
+
+  for pattern in "${python_patterns[@]}"; do
+    pkill "-$signal" -f "$pattern" || true
+  done
+
+  for proc in "${native_procs[@]}"; do
+    sudo pkill "-$signal" -x "$proc" || true
+  done
+}
+
 # prevent storage from filling up
 rm -rf /data/media/0/realdata/*
 
 # aborted Jenkins jobs can leave hardware tests running after the lock is released
-pkill -INT -f "/usr/local/venv/bin/pytest" || true
-pkill -INT -f "system/manager/manager.py" || true
-sudo pkill -INT -x camerad || true
+cleanup_openpilot_processes INT
 sleep 1
-pkill -KILL -f "/usr/local/venv/bin/pytest" || true
-pkill -KILL -f "system/manager/manager.py" || true
-sudo pkill -KILL -x camerad || true
+cleanup_openpilot_processes KILL
 shrink_ion_system_heap
 
 rm -rf /data/safe_staging/ || true
