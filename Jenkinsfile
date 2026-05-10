@@ -202,6 +202,110 @@ node {
 
   if (env.BRANCH_NAME == 'jenkins_mem_probe') {
     deviceStage("ui dma-buf probe", TIZI_NEEDS_CAN, ["UNSAFE=1"], [
+      step("install fixed raylib", '''
+set -euo pipefail
+
+workdir=/tmp/raylib_dmabuf_fix
+rm -rf "${workdir}"
+mkdir -p "${workdir}/install" "${workdir}/include"
+
+git clone -b master --no-tags https://github.com/commaai/raylib.git "${workdir}/raylib_repo"
+cd "${workdir}/raylib_repo"
+git fetch origin faf6e4392780de7471504e43e70975efaba07e95
+git reset --hard faf6e4392780de7471504e43e70975efaba07e95
+git clean -xdff .
+git apply <<'PATCH'
+diff --git a/src/platforms/rcore_comma.c b/src/platforms/rcore_comma.c
+index 7883c91f..86af8a43 100644
+--- a/src/platforms/rcore_comma.c
++++ b/src/platforms/rcore_comma.c
+@@ -969,6 +969,9 @@ void SwapScreenBuffer(void) {
+   }
+ 
+   platform.gbm.current_bo = platform.gbm.next_bo;
++  platform.gbm.current_fb = platform.gbm.next_fb;
++  platform.gbm.next_bo = NULL;
++  platform.gbm.next_fb = 0;
+ }
+ 
+ //----------------------------------------------------------------------------------
+@@ -1099,6 +1102,18 @@ void PollInputEvents(void) {
+ //----------------------------------------------------------------------------------
+ 
+ int InitPlatform(void) {
++  platform.drm.fd = -1;
++  platform.egl.display = EGL_NO_DISPLAY;
++  platform.egl.surface = EGL_NO_SURFACE;
++  platform.egl.context = EGL_NO_CONTEXT;
++  platform.gbm.device = NULL;
++  platform.gbm.surface = NULL;
++  platform.gbm.current_bo = NULL;
++  platform.gbm.next_bo = NULL;
++  platform.gbm.current_fb = 0;
++  platform.gbm.next_fb = 0;
++  platform.touch.fd = -1;
++
+   // only support fullscreen
+   CORE.Window.fullscreen = true;
+   CORE.Window.flags |= FLAG_FULLSCREEN_MODE;
+@@ -1169,8 +1184,21 @@ void ClosePlatform(void) {
+     platform.egl.display = EGL_NO_DISPLAY;
+   }
+ 
+-  if (platform.gbm.surface && platform.gbm.next_bo) {
+-    gbm_surface_release_buffer(platform.gbm.surface, platform.gbm.next_bo);
++  if (platform.gbm.surface) {
++    if (platform.gbm.next_bo) {
++      gbm_surface_release_buffer(platform.gbm.surface, platform.gbm.next_bo);
++      platform.gbm.next_bo = NULL;
++      platform.gbm.next_fb = 0;
++    }
++
++    if (platform.gbm.current_bo) {
++      gbm_surface_release_buffer(platform.gbm.surface, platform.gbm.current_bo);
++      platform.gbm.current_bo = NULL;
++      platform.gbm.current_fb = 0;
++    }
++
++    gbm_surface_destroy(platform.gbm.surface);
++    platform.gbm.surface = NULL;
+   }
+ 
+   if (platform.gbm.device) {
+@@ -1178,5 +1206,13 @@ void ClosePlatform(void) {
+     platform.gbm.device = NULL;
+   }
+ 
+-  close(platform.touch.fd);
++  if (platform.drm.fd >= 0) {
++    close(platform.drm.fd);
++    platform.drm.fd = -1;
++  }
++
++  if (platform.touch.fd >= 0) {
++    close(platform.touch.fd);
++    platform.touch.fd = -1;
++  }
+ }
+PATCH
+
+cd "${workdir}/raylib_repo/src"
+make -j$(nproc) PLATFORM=PLATFORM_COMMA RAYLIB_RELEASE_PATH="${workdir}/install"
+cp raylib.h raymath.h rlgl.h "${workdir}/include/"
+curl -fsSLo "${workdir}/include/raygui.h" https://raw.githubusercontent.com/raysan5/raygui/76b36b597edb70ffaf96f046076adc20d67e7827/src/raygui.h
+
+git clone -b master --no-tags https://github.com/commaai/raylib-python-cffi.git "${workdir}/raylib_python_repo"
+cd "${workdir}/raylib_python_repo"
+git fetch origin a0710d95af3c12fd7f4b639589be9a13dad93cb6
+git reset --hard a0710d95af3c12fd7f4b639589be9a13dad93cb6
+git clean -xdff .
+RAYLIB_PLATFORM=PLATFORM_COMMA RAYLIB_INCLUDE_PATH="${workdir}/include" RAYLIB_LIB_PATH="${workdir}/install" python setup.py bdist_wheel
+python -m pip install --force-reinstall --no-deps dist/raylib-*.whl
+python - <<'PY'
+import pyray as rl
+print("installed raylib:", rl.RAYLIB_VERSION)
+PY
+''', [timeout: 900]),
       step("ui dma-buf probe", '''
 set -euo pipefail
 
