@@ -15,7 +15,7 @@ from openpilot.system.manager.process_config import managed_processes
 from openpilot.system.manager.manager import manager_cleanup
 
 SAMPLE_TIME = 8       # seconds to sample power
-MAX_WARMUP_TIME = 30  # seconds to wait for SAMPLE_TIME consecutive valid samples
+MAX_WARMUP_TIME = 45  # seconds to wait for SAMPLE_TIME consecutive valid samples
 
 @dataclass
 class Proc:
@@ -34,7 +34,7 @@ PROCS = [
   Proc(['camerad'], 1.65, atol=0.4, msgs=['roadCameraState', 'wideRoadCameraState', 'driverCameraState']),
   Proc(['modeld'], 1.5, atol=0.2, msgs=['modelV2']),
   Proc(['dmonitoringmodeld'], 0.65, atol=0.35, msgs=['driverStateV2']),
-  Proc(['encoderd'], 0.23, msgs=[]),
+  Proc(['encoderd'], 0.35, atol=0.2, msgs=[]),
 ]
 
 

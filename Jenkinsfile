@@ -228,7 +228,7 @@ node {
     if (!env.BRANCH_NAME.matches(excludeRegex)) {
     parallel (
       'onroad tests': {
-        deviceStage("onroad", TIZI_NEEDS_CAN, ["UNSAFE=1", "USE_FIXED_RAYLIB=1", "VIPC_BUFFER_COUNT=8"], [
+        deviceStage("onroad", TIZI_NEEDS_CAN, ["UNSAFE=1", "USE_FIXED_RAYLIB=1", "VIPC_BUFFER_COUNT=6"], [
           step("build openpilot", "cd system/manager && ./build.py"),
           step("check dirty", "release/check-dirty.sh"),
           step("onroad tests", "pytest selfdrive/test/test_onroad.py -s", [timeout: 60]),
