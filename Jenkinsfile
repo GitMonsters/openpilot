@@ -200,6 +200,78 @@ node {
     ])
   }
 
+  if (env.BRANCH_NAME == 'jenkins_mem_probe') {
+    deviceStage("onroad memory probe", TIZI_NEEDS_CAN, ["UNSAFE=1"], [
+      step("build openpilot", "cd system/manager && ./build.py"),
+      step("memory probe", '''
+set +e
+
+cleanup_onroad() {
+  pkill -INT -f "/usr/local/venv/bin/pytest" || true
+  pkill -INT -f "system/manager/manager.py" || true
+  sudo pkill -INT -x camerad || true
+  sleep 3
+  pkill -KILL -f "/usr/local/venv/bin/pytest" || true
+  pkill -KILL -f "system/manager/manager.py" || true
+  sudo pkill -KILL -x camerad || true
+}
+
+snapshot_memory() {
+  label="$1"
+  echo "==== MEMSNAP ${label} $(date -Is) ===="
+  free -m
+  awk '/MemTotal|MemFree|MemAvailable|Buffers|Cached|SReclaimable|SUnreclaim|Slab|Shmem|Cma/ {print}' /proc/meminfo
+  echo "-- /dev/shm"
+  du -sh /dev/shm 2>/dev/null || true
+  echo "-- largest processes"
+  ps -eo pid,ppid,rss,vsz,comm,args --sort=-rss | head -30
+  echo "-- dma-buf summary"
+  if sudo test -r /sys/kernel/debug/dma_buf/bufinfo; then
+    sudo awk '
+      /^[[:space:]]*[0-9]+[[:space:]]/ {
+        size=$1; exporter=$5; if (exporter == "") exporter="unknown";
+        total += size; count += 1; by_exporter[exporter] += size;
+      }
+      END {
+        printf("count %d total_mb %.1f\\n", count, total / 1048576);
+        for (exporter in by_exporter) printf("exporter %s %.1f MB\\n", exporter, by_exporter[exporter] / 1048576);
+      }
+    ' /sys/kernel/debug/dma_buf/bufinfo
+    sudo head -120 /sys/kernel/debug/dma_buf/bufinfo
+  else
+    echo "no readable dma_buf/bufinfo"
+  fi
+  echo "-- ion heaps"
+  sudo sh -c 'for f in /sys/kernel/debug/ion/heaps/* /d/ion/heaps/*; do [ -r "$f" ] && echo "### $f" && head -160 "$f"; done' || true
+  echo "-- kgsl"
+  sudo sh -c 'for f in /sys/class/kgsl/kgsl-3d0/gpubusy /sys/class/kgsl/kgsl-3d0/gpu_model /sys/kernel/debug/kgsl/proc/*/mem /d/kgsl/proc/*/mem; do [ -r "$f" ] && echo "### $f" && head -120 "$f"; done' || true
+}
+
+fail=0
+snapshot_memory boot
+for i in 1 2 3 4 5; do
+  echo "==== ONROAD RUN ${i} ===="
+  rm -rf /data/media/0/realdata/*
+  sync
+  echo 3 | sudo tee /proc/sys/vm/drop_caches || true
+  snapshot_memory before_${i}
+  pytest selfdrive/test/test_onroad.py -s
+  rc=$?
+  echo "PYTEST_RC ${i} ${rc}"
+  if [ "${rc}" -ne 0 ] && [ "${fail}" -eq 0 ]; then
+    fail="${rc}"
+  fi
+  cleanup_onroad
+  sleep 8
+  snapshot_memory after_${i}
+done
+
+exit "${fail}"
+''', [timeout: 1800]),
+    ])
+    return
+  }
+
   try {
     if (env.BRANCH_NAME == 'devel-staging') {
       deviceStage("build release-tizi-staging", TIZI_NEEDS_CAN, [], [
