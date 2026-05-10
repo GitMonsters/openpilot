@@ -201,6 +201,118 @@ node {
   }
 
   if (env.BRANCH_NAME == 'jenkins_mem_probe') {
+    deviceStage("ui dma-buf probe", TIZI_NEEDS_CAN, ["UNSAFE=1"], [
+      step("ui dma-buf probe", '''
+set -euo pipefail
+
+cleanup_ui_probe() {
+  pkill -INT -f "ui-dmabuf-probe" || true
+  sleep 1
+  pkill -KILL -f "ui-dmabuf-probe" || true
+}
+
+snapshot_dma() {
+  label="$1"
+  echo "==== DMABUF ${label} $(date -Is) ===="
+  free -m
+  du -sh /dev/shm 2>/dev/null || true
+  if sudo test -r /sys/kernel/debug/dma_buf/bufinfo; then
+    sudo awk '
+      function remember_object() {
+        if (!in_object) return
+        if (mdss) {
+          mdss_count += 1
+          mdss_total += size
+          mdss_by_size[size] += 1
+        }
+      }
+      /^[[:space:]]*[0-9]+[[:space:]]/ {
+        remember_object()
+        in_object=1
+        size=$1 + 0
+        exporter=$5
+        if (exporter == "") exporter="unknown"
+        mdss=0
+        total += size
+        count += 1
+        by_exporter[exporter] += size
+        by_size[size] += 1
+        next
+      }
+      /mdss_mdp/ {
+        mdss=1
+      }
+      END {
+        remember_object()
+        printf("count %d total_mb %.1f\\n", count, total / 1048576);
+        for (exporter in by_exporter) printf("exporter %s %.1f MB\\n", exporter, by_exporter[exporter] / 1048576);
+        printf("mdss_count %d mdss_total_mb %.1f\\n", mdss_count, mdss_total / 1048576);
+        for (size in by_size) printf("size %d count %d total_mb %.1f\\n", size, by_size[size], size * by_size[size] / 1048576);
+        for (size in mdss_by_size) printf("mdss_size %d count %d total_mb %.1f\\n", size, mdss_by_size[size], size * mdss_by_size[size] / 1048576);
+      }
+    ' /sys/kernel/debug/dma_buf/bufinfo
+    sudo awk '
+      /^[[:space:]]*[0-9]+[[:space:]]/ {obj=$0; show=0; lines=""}
+      {lines=lines $0 "\\n"}
+      /mdss_mdp/ {show=1}
+      /^Total [0-9]+ devices attached/ {
+        if (show) printf "%s", lines
+        lines=""
+      }
+    ' /sys/kernel/debug/dma_buf/bufinfo | head -160
+  else
+    echo "no readable dma_buf/bufinfo"
+  fi
+}
+
+run_ui_once() {
+  terminate="$1"
+  python - "$terminate" <<'PY'
+import sys
+import time
+
+import pyray as rl
+
+from openpilot.system.ui.lib.application import gui_app
+
+terminate = sys.argv[1] == "1"
+gui_app.init_window("ui-dmabuf-probe")
+for _ in range(5):
+  rl.begin_drawing()
+  rl.clear_background(rl.BLACK)
+  rl.draw_text("probe", 20, 20, 40, rl.WHITE)
+  rl.end_drawing()
+  time.sleep(0.05)
+gui_app.close()
+if terminate:
+  rl.glfw_terminate()
+PY
+}
+
+run_case() {
+  name="$1"
+  terminate="$2"
+  snapshot_dma "${name}_before"
+  for i in 1 2 3 4 5; do
+    echo "==== UI CASE ${name} ITER ${i} terminate=${terminate} ===="
+    cleanup_ui_probe
+    rm -rf /dev/shm/*
+    run_ui_once "${terminate}"
+    cleanup_ui_probe
+    sleep 2
+    snapshot_dma "${name}_after_${i}"
+  done
+}
+
+snapshot_dma boot
+run_case close_only 0
+run_case close_then_glfw_terminate 1
+''', [timeout: 600]),
+    ])
+    return
+  }
+
+  if (env.BRANCH_NAME == 'jenkins_mem_probe_onroad') {
     deviceStage("onroad memory probe", TIZI_NEEDS_CAN, ["UNSAFE=1"], [
       step("build openpilot", "cd system/manager && ./build.py"),
       step("memory probe", '''
