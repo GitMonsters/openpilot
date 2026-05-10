@@ -301,7 +301,7 @@ git remote add origin https://github.com/commaai/raylib-python-cffi.git
 git fetch --depth 1 origin a0710d95af3c12fd7f4b639589be9a13dad93cb6
 git checkout --detach FETCH_HEAD
 git clean -xdff .
-RAYLIB_PLATFORM=PLATFORM_COMMA RAYLIB_INCLUDE_PATH="${workdir}/include" RAYLIB_LIB_PATH="${workdir}/install" python setup.py bdist_wheel
+PYTHONWARNINGS=default RAYLIB_PLATFORM=PLATFORM_COMMA RAYLIB_INCLUDE_PATH="${workdir}/include" RAYLIB_LIB_PATH="${workdir}/install" python setup.py bdist_wheel
 python -m pip install --force-reinstall --no-deps dist/raylib-*.whl
 python - <<'PY'
 import pyray as rl
