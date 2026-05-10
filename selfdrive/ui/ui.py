@@ -18,30 +18,40 @@ def main():
   # above plannerd and radard
   config_realtime_process(0, Priority.CTRL_HIGH)
 
-  gui_app.init_window("UI")
-  if BIG_UI:
-    MainLayout()
-  else:
-    MiciMainLayout()
+  main_layout = None
+  render = None
+  try:
+    gui_app.init_window("UI")
+    if BIG_UI:
+      main_layout = MainLayout()
+    else:
+      main_layout = MiciMainLayout()
 
-  pm = messaging.PubMaster(['uiDebug'])
-  for should_render, frame_time, cpu_time in gui_app.render():
-    extra_start = time.monotonic()
-    ui_state.update()
+    pm = messaging.PubMaster(['uiDebug'])
+    render = gui_app.render()
+    for should_render, frame_time, cpu_time in render:
+      extra_start = time.monotonic()
+      ui_state.update()
 
-    if should_render:
-      # reaffine after power save offlines our core
-      if TICI and os.sched_getaffinity(0) != cores:
-        try:
-          set_core_affinity(list(cores))
-        except OSError:
-          pass
+      if should_render:
+        # reaffine after power save offlines our core
+        if TICI and os.sched_getaffinity(0) != cores:
+          try:
+            set_core_affinity(list(cores))
+          except OSError:
+            pass
 
-      extra_cpu = time.monotonic() - extra_start
-      msg = messaging.new_message('uiDebug')
-      msg.uiDebug.cpuTimeMillis = (cpu_time + extra_cpu) * 1000
-      msg.uiDebug.frameTimeMillis = frame_time * 1000
-      pm.send('uiDebug', msg)
+        extra_cpu = time.monotonic() - extra_start
+        msg = messaging.new_message('uiDebug')
+        msg.uiDebug.cpuTimeMillis = (cpu_time + extra_cpu) * 1000
+        msg.uiDebug.frameTimeMillis = frame_time * 1000
+        pm.send('uiDebug', msg)
+  finally:
+    if render is not None:
+      render.close()
+    if main_layout is not None:
+      main_layout.close()
+    gui_app.close()
 
 
 if __name__ == "__main__":

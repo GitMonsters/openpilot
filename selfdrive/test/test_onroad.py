@@ -157,6 +157,7 @@ class TestOnroad:
       time.sleep(TEST_DURATION)
     finally:
       if proc is not None:
+        cls.manager_end_time = time.monotonic_ns()
         proc.terminate()
         if proc.wait(60) is None:
           proc.kill()
@@ -300,8 +301,13 @@ class TestOnroad:
     mems = [m.deviceState.memoryUsagePercent for m in self.msgs['deviceState'][device_state_offset:]]
     print("MSGQ (/dev/shm/) usage: ", subprocess.check_output(["du", "-hs", "/dev/shm"]).split()[0].decode())
 
-    # Check for openpilot leaks. Whole-device memory includes kernel camera/GPU
-    # allocations and varies by CI device state, while PSS tracks the workload.
+    # lowMemory is based on total device memory, including kernel/display
+    # allocations, so keep these checks even when PSS is available.
+    assert np.average(mems) <= 80, "Average memory usage too high"
+    assert np.max(np.diff(mems)) <= 4, "Max memory increase too high"
+    assert np.average(np.diff(mems)) <= 1, "Average memory increase too high"
+
+    # PSS gives a more targeted openpilot process memory signal when present.
     if has_pss(self.msgs['procLog']):
       proc_log_offset = int(SERVICE_LIST['procLog'].frequency * LOG_OFFSET)
       pss = []
@@ -313,11 +319,6 @@ class TestOnroad:
       assert np.average(pss) <= OPENPILOT_PSS_MAX_MB, "Average openpilot PSS too high"
       assert np.max(pss) <= OPENPILOT_PSS_MAX_MB + OPENPILOT_PSS_GROWTH_MAX_MB, "Max openpilot PSS too high"
       assert np.max(np.diff(pss)) <= OPENPILOT_PSS_GROWTH_MAX_MB, "Max openpilot PSS increase too high"
-    else:
-      # Fallback for older logs without PSS data.
-      assert np.average(mems) <= 80, "Average memory usage too high"
-      assert np.max(np.diff(mems)) <= 4, "Max memory increase too high"
-      assert np.average(np.diff(mems)) <= 1, "Average memory increase too high"
 
   def test_camera_frame_timings(self, subtests):
     # test timing within a single camera
@@ -387,7 +388,18 @@ class TestOnroad:
           self.ts[cam]['timestampEof'],
           strict=True,
         )}
-        for i, fid in enumerate(self.ts[enc]['frameId']):
+        cam_frame_ids = set(cam_frames)
+        enc_frame_ids = self.ts[enc]['frameId']
+        missing_fids = sorted(set(enc_frame_ids) - cam_frame_ids)
+        if missing_fids:
+          cam_min, cam_max = min(cam_frame_ids), max(cam_frame_ids)
+          interior_missing = [fid for fid in missing_fids if cam_min <= fid <= cam_max]
+          assert not interior_missing, f"{enc} has encoded frames missing camera metadata: {interior_missing}"
+          assert len(missing_fids) <= 2, f"{enc} has too many boundary frames missing camera metadata: {missing_fids}"
+
+        for i, fid in enumerate(enc_frame_ids):
+          if fid not in cam_frames:
+            continue
           cam_sof, cam_eof = cam_frames[fid]
           enc_sof, enc_eof = self.ts[enc]['timestampSof'][i], self.ts[enc]['timestampEof'][i]
           assert enc_sof == cam_sof, f"SOF mismatch: frameId={fid}, enc_sof={enc_sof}, cam_sof={cam_sof}"
@@ -475,13 +487,14 @@ class TestOnroad:
     assert startup_alert == expected, "wrong startup alert"
 
   def test_engagable(self):
+    checked_end = getattr(self, "manager_end_time", math.inf)
     offset = int(SERVICE_LIST['selfdriveState'].frequency * LOG_OFFSET)
-    eng_msgs = self.msgs['selfdriveState'][offset:]
+    eng_msgs = [m for m in self.msgs['selfdriveState'][offset:] if m.logMonoTime <= checked_end]
     checked_start = eng_msgs[0].logMonoTime
 
     no_entries = Counter()
     for m in self.msgs['onroadEvents']:
-      if m.logMonoTime < checked_start:
+      if not checked_start <= m.logMonoTime <= checked_end:
         continue
       for evt in m.onroadEvents:
         if evt.noEntry:

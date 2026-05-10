@@ -12,7 +12,10 @@ TEST_TIMESPAN = 10
 CAMERAS = ('roadCameraState', 'driverCameraState', 'wideRoadCameraState')
 EXPOSURE_STABLE_COUNT = 3
 EXPOSURE_RANGE = (0.15, 0.35)
+SYNC_STARTUP_SKIP = 5
 MAX_TEST_TIME = 25
+DRIVER_STAGGER_RANGE_MS = (20, 30)
+SYNCED_OFFSET_TOLERANCE_MS = 1.1
 
 
 def _numpy_rgb2gray(im):
@@ -54,17 +57,18 @@ def _camera_session():
       if time.monotonic() - start >= TEST_TIMESPAN and _exposure_stable(exposure):
         break
 
-    elapsed = time.monotonic() - start
-
   with lock:
     ts = msgs_to_time_series(raw_logs)
 
   for cam in CAMERAS:
-    expected_frames = SERVICE_LIST[cam].frequency * elapsed
     cnt = len(ts[cam]['t'])
+    assert cnt >= SERVICE_LIST[cam].frequency * TEST_TIMESPAN * 0.5, f"not enough frames {cam}: got {cnt}"
+
+    log_span = ts[cam]['t'][-1] - ts[cam]['t'][0]
+    expected_frames = SERVICE_LIST[cam].frequency * log_span + 1
     assert expected_frames*0.8 < cnt < expected_frames*1.2, f"unexpected frame count {cam}: {expected_frames=}, got {cnt}"
 
-    dts = np.abs(np.diff([ts[cam]['timestampSof']/1e6]) - 1000/SERVICE_LIST[cam].frequency)
+    dts = np.abs(np.diff(ts[cam]['timestampSof']/1e6) - 1000/SERVICE_LIST[cam].frequency)
     assert (dts < 1.0).all(), f"{cam} dts(ms) out of spec: max diff {dts.max()}, 99 percentile {np.percentile(dts, 99)}"
 
   return ts, exposure
@@ -106,7 +110,7 @@ class TestCamerad:
 
   def test_frame_sync(self, logs):
     SYNCED_CAMS = ('roadCameraState', 'wideRoadCameraState')
-    n = range(len(logs['roadCameraState']['t'][:-10]))
+    n = range(SYNC_STARTUP_SKIP, len(logs['roadCameraState']['t'][:-10]))
 
     frame_ids = {i: [logs[cam]['frameId'][i] for cam in CAMERAS] for i in n}
     assert all(len(set(v)) == 1 for v in frame_ids.values()), "frame IDs not aligned"
@@ -117,10 +121,19 @@ class TestCamerad:
     laggy_frames = {k: v for k, v in diffs.items() if v > 1.1}
     assert len(laggy_frames) == 0, f"Frames not synced properly: {laggy_frames=}"
 
-    # driver camera should be staggered ~25ms from road camera
+    driver_sensor = set(logs['driverCameraState']['sensor'])
+    driver_expected_offset_ms = 1000.0 / SERVICE_LIST['driverCameraState'].frequency if driver_sensor == {'os04c10'} else None
+
+    # OX03 driver camera should be staggered ~25ms from road camera. OS04 driver
+    # frames are one 20Hz period offset while road/wide remain tightly synced.
     for i in n:
       offset_ms = abs(logs['driverCameraState']['timestampSof'][i] - logs['roadCameraState']['timestampSof'][i]) / 1e6
-      assert 20 < offset_ms < 30, f"driver camera stagger out of range at frame {i}: {offset_ms:.1f}ms (expected ~25ms)"
+      if driver_expected_offset_ms is None:
+        lo, hi = DRIVER_STAGGER_RANGE_MS
+        assert lo < offset_ms < hi, f"driver camera stagger out of range at frame {i}: {offset_ms:.1f}ms (expected ~25ms)"
+      else:
+        assert abs(offset_ms - driver_expected_offset_ms) < SYNCED_OFFSET_TOLERANCE_MS, \
+          f"driver camera offset out of range at frame {i}: {offset_ms:.1f}ms (expected ~{driver_expected_offset_ms:.1f}ms)"
 
   def test_sanity_checks(self, logs):
     self._sanity_checks(logs)

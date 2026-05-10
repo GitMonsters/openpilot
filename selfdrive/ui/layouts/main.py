@@ -64,6 +64,12 @@ class MainLayout(Widget):
     device.add_interactive_timeout_callback(self._set_mode_for_state)
     ui_state.add_on_body_changed_callbacks(self._on_body_changed)
 
+  def close(self):
+    for layout in (*self._layouts.values(), self._home_body_layout, self._onboarding_window):
+      close = getattr(layout, "close", None)
+      if close is not None:
+        close()
+
   def _update_layout_rects(self):
     self._sidebar_rect = rl.Rectangle(self._rect.x, self._rect.y, SIDEBAR_WIDTH, self._rect.height)
 

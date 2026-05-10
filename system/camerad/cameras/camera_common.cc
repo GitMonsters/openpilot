@@ -1,11 +1,31 @@
 #include "system/camerad/cameras/camera_common.h"
 
 #include <cassert>
+#include <cstdlib>
 #include <string>
 
 #include "common/swaglog.h"
 #include "system/camerad/cameras/spectra.h"
 
+
+int get_vipc_buffer_count() {
+  static int buffer_count = []() {
+    const char *env_count = std::getenv("VIPC_BUFFER_COUNT");
+    if (env_count == nullptr) {
+      return DEFAULT_VIPC_BUFFER_COUNT;
+    }
+
+    char *end = nullptr;
+    long parsed_count = std::strtol(env_count, &end, 10);
+    if (end != env_count && *end == '\0' && parsed_count > 0 && parsed_count < MAX_IFE_BUFS) {
+      return static_cast<int>(parsed_count);
+    }
+
+    LOGW("ignoring invalid VIPC_BUFFER_COUNT=%s", env_count);
+    return DEFAULT_VIPC_BUFFER_COUNT;
+  }();
+  return buffer_count;
+}
 
 void CameraBuf::init(SpectraCamera *cam, VisionIpcServer * v, int frame_cnt, VisionStreamType type) {
   vipc_server = v;
@@ -25,8 +45,9 @@ void CameraBuf::init(SpectraCamera *cam, VisionIpcServer * v, int frame_cnt, Vis
     LOGD("allocated %d buffers", frame_buf_count);
   }
 
-  vipc_server->create_buffers_with_sizes(stream_type, VIPC_BUFFER_COUNT, out_img_width, out_img_height, cam->yuv_size, cam->stride, cam->uv_offset);
-  LOGD("created %d YUV vipc buffers with size %dx%d", VIPC_BUFFER_COUNT, cam->stride, cam->y_height);
+  const int vipc_buffer_count = get_vipc_buffer_count();
+  vipc_server->create_buffers_with_sizes(stream_type, vipc_buffer_count, out_img_width, out_img_height, cam->yuv_size, cam->stride, cam->uv_offset);
+  LOGD("created %d YUV vipc buffers with size %dx%d", vipc_buffer_count, cam->stride, cam->y_height);
 }
 
 CameraBuf::~CameraBuf() {

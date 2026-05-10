@@ -7,7 +7,9 @@
 #include "common/util.h"
 
 
-const int VIPC_BUFFER_COUNT = 18;
+const int DEFAULT_VIPC_BUFFER_COUNT = 18;
+
+int get_vipc_buffer_count();
 
 typedef struct FrameMetadata {
   uint32_t frame_id;

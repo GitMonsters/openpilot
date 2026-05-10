@@ -79,6 +79,13 @@ class MiciMainLayout(Scroller):
     device.add_interactive_timeout_callback(self._on_interactive_timeout)
     ui_state.add_on_body_changed_callbacks(self._on_body_changed)
 
+  def close(self):
+    for layout in (self._home_layout, self._alerts_layout, self._settings_layout,
+                   self._car_onroad_layout, self._body_onroad_layout, self._onboarding_window):
+      close = getattr(layout, "close", None)
+      if close is not None:
+        close()
+
   def _scroll_to(self, layout: Widget):
     layout_x = int(layout.rect.x)
     self._scroller.scroll_to(layout_x, smooth=True)

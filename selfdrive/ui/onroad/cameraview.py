@@ -153,10 +153,12 @@ class CameraView(Widget):
     # Clean up shader
     if self.shader and self.shader.id:
       rl.unload_shader(self.shader)
+      self.shader.id = 0
 
     self.frame = None
     self.available_streams.clear()
     self.client = None
+    self._target_client = None
 
   def __del__(self):
     self.close()

@@ -223,6 +223,7 @@ class GuiApplication:
     self._last_fps_log_time: float = time.monotonic()
     self._frame = 0
     self._window_close_requested = False
+    self._closing = False
     self._nav_stack: list[object] = []
     self._nav_stack_ticks: list[Callable[[], None]] = []
     self._nav_stack_widgets_to_render = 1 if self.big_ui() else 2
@@ -265,10 +266,12 @@ class GuiApplication:
 
   def init_window(self, title: str, fps: int = _DEFAULT_FPS):
     with self._startup_profile_context():
-      def _close(sig, frame):
-        self.close()
-        sys.exit(0)
-      signal.signal(signal.SIGINT, _close)
+      def _request_close(_sig, _frame):
+        self.request_close()
+
+      self._window_close_requested = False
+      signal.signal(signal.SIGINT, _request_close)
+      signal.signal(signal.SIGTERM, _request_close)
       atexit.register(self.close)
 
       flags = rl.ConfigFlags.FLAG_MSAA_4X_HINT
@@ -543,31 +546,39 @@ class GuiApplication:
         self._ffmpeg_proc.wait()
 
   def close(self):
-    if not rl.is_window_ready():
+    self.request_close()
+    if self._closing:
       return
 
-    for texture in self._textures.values():
-      rl.unload_texture(texture)
-    self._textures = {}
+    self._closing = True
+    try:
+      if not rl.is_window_ready():
+        return
 
-    for font in self._fonts.values():
-      rl.unload_font(font)
-    self._fonts = {}
+      for texture in self._textures.values():
+        rl.unload_texture(texture)
+      self._textures = {}
 
-    if self._render_texture is not None:
-      rl.unload_render_texture(self._render_texture)
-      self._render_texture = None
+      for font in self._fonts.values():
+        rl.unload_font(font)
+      self._fonts = {}
 
-    if self._burn_in_shader:
-      rl.unload_shader(self._burn_in_shader)
-      self._burn_in_shader = None
+      if self._render_texture is not None:
+        rl.unload_render_texture(self._render_texture)
+        self._render_texture = None
 
-    if not PC:
-      self._mouse.stop()
+      if self._burn_in_shader:
+        rl.unload_shader(self._burn_in_shader)
+        self._burn_in_shader = None
 
-    self.close_ffmpeg()
+      if not PC:
+        self._mouse.stop()
 
-    rl.close_window()
+      self.close_ffmpeg()
+
+      rl.close_window()
+    finally:
+      self._closing = False
 
   @property
   def mouse_events(self) -> list[MouseEvent]:
@@ -605,70 +616,86 @@ class GuiApplication:
           yield False, 0.0, 0.0
           continue
 
-        if self._render_texture:
-          rl.begin_texture_mode(self._render_texture)
-          rl.clear_background(rl.BLACK)
-        else:
-          rl.begin_drawing()
-          rl.clear_background(rl.BLACK)
+        drawing_started = False
+        texture_mode_started = False
+        matrix_pushed = False
+        frame_ready = False
+        try:
+          if self._render_texture:
+            rl.begin_texture_mode(self._render_texture)
+            texture_mode_started = True
+            rl.clear_background(rl.BLACK)
+          else:
+            rl.begin_drawing()
+            drawing_started = True
+            rl.clear_background(rl.BLACK)
 
-        if self._scale != 1.0:
-          rl.rl_push_matrix()
-          rl.rl_scalef(self._scale, self._scale, 1.0)
+          if self._scale != 1.0:
+            rl.rl_push_matrix()
+            matrix_pushed = True
+            rl.rl_scalef(self._scale, self._scale, 1.0)
 
-        # Allow a Widget to still run a function regardless of the stack depth
-        for tick in self._nav_stack_ticks:
-          tick()
+          # Allow a Widget to still run a function regardless of the stack depth
+          for tick in self._nav_stack_ticks:
+            tick()
 
-        # Only render top widgets
-        for widget in self._nav_stack[-self._nav_stack_widgets_to_render:]:
-          widget.render(rl.Rectangle(0, 0, self.width, self.height))
+          # Only render top widgets
+          for widget in self._nav_stack[-self._nav_stack_widgets_to_render:]:
+            widget.render(rl.Rectangle(0, 0, self.width, self.height))
 
-        frame_time = rl.get_frame_time()
-        cpu_time = time.monotonic() - frame_start
-        yield True, frame_time, cpu_time
+          frame_time = rl.get_frame_time()
+          cpu_time = time.monotonic() - frame_start
+          frame_ready = True
+          yield True, frame_time, cpu_time
+        finally:
+          if matrix_pushed:
+            rl.rl_pop_matrix()
 
-        if self._scale != 1.0:
-          rl.rl_pop_matrix()
+          if texture_mode_started:
+            rl.end_texture_mode()
+            texture_mode_started = False
 
-        if self._render_texture:
-          rl.end_texture_mode()
-          rl.begin_drawing()
-          rl.clear_background(rl.BLACK)
-          src_rect = rl.Rectangle(0, 0, float(self._scaled_width), -float(self._scaled_height))
-          dst_rect = rl.Rectangle(0, 0, float(self._scaled_width), float(self._scaled_height))
-          texture = self._render_texture.texture
-          if texture:
-            if BURN_IN_MODE and self._burn_in_shader:
-              rl.begin_shader_mode(self._burn_in_shader)
-              rl.draw_texture_pro(texture, src_rect, dst_rect, rl.Vector2(0, 0), 0.0, rl.WHITE)
-              rl.end_shader_mode()
-            else:
-              rl.draw_texture_pro(texture, src_rect, dst_rect, rl.Vector2(0, 0), 0.0, rl.WHITE)
+            if frame_ready:
+              rl.begin_drawing()
+              drawing_started = True
+              rl.clear_background(rl.BLACK)
+              src_rect = rl.Rectangle(0, 0, float(self._scaled_width), -float(self._scaled_height))
+              dst_rect = rl.Rectangle(0, 0, float(self._scaled_width), float(self._scaled_height))
+              texture = self._render_texture.texture
+              if texture:
+                if BURN_IN_MODE and self._burn_in_shader:
+                  rl.begin_shader_mode(self._burn_in_shader)
+                  rl.draw_texture_pro(texture, src_rect, dst_rect, rl.Vector2(0, 0), 0.0, rl.WHITE)
+                  rl.end_shader_mode()
+                else:
+                  rl.draw_texture_pro(texture, src_rect, dst_rect, rl.Vector2(0, 0), 0.0, rl.WHITE)
 
-        if self._show_fps:
-          rl.draw_fps(10, 10)
+          if frame_ready:
+            if self._show_fps:
+              rl.draw_fps(10, 10)
 
-        if self._show_touches:
-          self._draw_touch_points()
+            if self._show_touches:
+              self._draw_touch_points()
 
-        if self._grid_size > 0:
-          self._draw_grid()
+            if self._grid_size > 0:
+              self._draw_grid()
 
-        rl.end_drawing()
+          if drawing_started:
+            rl.end_drawing()
 
-        if RECORD:
-          image = rl.load_image_from_texture(self._render_texture.texture)
-          data_size = image.width * image.height * 4
-          data = bytes(rl.ffi.buffer(image.data, data_size))
-          self._ffmpeg_queue.put(data)  # Async write via background thread
-          rl.unload_image(image)
+          if frame_ready:
+            if RECORD:
+              image = rl.load_image_from_texture(self._render_texture.texture)
+              data_size = image.width * image.height * 4
+              data = bytes(rl.ffi.buffer(image.data, data_size))
+              self._ffmpeg_queue.put(data)  # Async write via background thread
+              rl.unload_image(image)
 
-        self._monitor_fps()
-        self._frame += 1
+            self._monitor_fps()
+            self._frame += 1
 
-        if self._profile_render_frames > 0 and self._frame >= self._profile_render_frames:
-          self._output_render_profile()
+            if self._profile_render_frames > 0 and self._frame >= self._profile_render_frames:
+              self._output_render_profile()
     except KeyboardInterrupt:
       pass
 

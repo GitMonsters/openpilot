@@ -87,12 +87,17 @@ def try_setup_logs(diag, logs):
 
 AT_PORT = "/dev/modem_at0"
 AT_LOCK = "/dev/shm/modem.lock"  # shared with modem.py and LPA
+AT_LOCK_DEPTH = 0
 
 @retry(attempts=5, delay=1.0)
 def at_cmd(cmd: str) -> str:
+  global AT_LOCK_DEPTH
   fd = os.open(AT_LOCK, os.O_CREAT | os.O_RDWR, 0o666)
+  lock_fd = AT_LOCK_DEPTH == 0
+  AT_LOCK_DEPTH += 1
   try:
-    fcntl.flock(fd, fcntl.LOCK_EX)
+    if lock_fd:
+      fcntl.flock(fd, fcntl.LOCK_EX)
     with Serial(AT_PORT, baudrate=115200, timeout=5) as ser:
       ser.reset_input_buffer()
       ser.write(f"{cmd}\r".encode())
@@ -108,6 +113,7 @@ def at_cmd(cmd: str) -> str:
           lines.append(line)
     return '\n'.join(lines)
   finally:
+    AT_LOCK_DEPTH -= 1
     os.close(fd)
 
 def gps_enabled() -> bool:

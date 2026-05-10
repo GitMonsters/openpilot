@@ -27,6 +27,14 @@ class TextWindow:
   def close(self):
     if self.text_proc is not None:
       self.text_proc.terminate()
+      try:
+        self.text_proc.communicate(timeout=2.)
+      except subprocess.TimeoutExpired:
+        self.text_proc.kill()
+        try:
+          self.text_proc.communicate(timeout=2.)
+        except subprocess.TimeoutExpired:
+          print("WARNING: failed to kill text window")
       self.text_proc = None
 
   def wait_for_exit(self):

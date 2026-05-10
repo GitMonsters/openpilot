@@ -44,6 +44,7 @@ class TestQcomgpsd:
       with subtests.test(runtime=s):
         managed_processes['qcomgpsd'].start()
         time.sleep(s)
-        managed_processes['qcomgpsd'].stop()
+        exit_code = managed_processes['qcomgpsd'].stop()
 
+        assert exit_code == 0
         assert not gps_enabled()

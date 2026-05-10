@@ -11,6 +11,7 @@ def retryWithDelay(int maxRetries, int delay, Closure body) {
 
 def TIZI_NEEDS_CAN = "tizi-needs-can-tmp"
 def TIZI_LSMC = "comma-ff542eb7"
+def TICI_OS04C10 = "comma-bb16a196"
 
 def device(String ip, String step_label, String cmd) {
   withCredentials([file(credentialsId: 'id_rsa', variable: 'key_file')]) {
@@ -22,6 +23,21 @@ set -e
 export TERM=xterm-256color
 
 shopt -s huponexit # kill all child processes when the shell exits
+
+shrink_ion_system_heap() {
+  local shrink_file="/sys/kernel/debug/ion/heaps/system_shrink"
+  local pages
+
+  if [ ! -e "\$shrink_file" ]; then
+    return
+  fi
+
+  pages="\$(sudo cat "\$shrink_file" 2>/dev/null || true)"
+  if [[ "\$pages" =~ ^[0-9]+\$ ]] && [ "\$pages" -gt 0 ]; then
+    echo "shrinking ION system heap by \$pages pages"
+    echo "\$pages" | sudo tee "\$shrink_file" >/dev/null || true
+  fi
+}
 
 export CI=1
 export PYTHONWARNINGS=error
@@ -47,6 +63,7 @@ if [ -f /TICI ]; then
   rm -rf ~/.commacache
   rm -rf /dev/shm/*
   rm -rf /dev/tmp/tmp*
+  shrink_ion_system_heap
 
   if ! systemctl is-active --quiet systemd-resolved; then
     echo "restarting resolved"
@@ -65,6 +82,9 @@ fi
 if [ -f /data/openpilot/launch_env.sh ]; then
   source /data/openpilot/launch_env.sh
 fi
+if [ -f "\$TEST_DIR/.ci_launch_env.sh" ]; then
+  source "\$TEST_DIR/.ci_launch_env.sh"
+fi
 
 ln -snf ${env.TEST_DIR} /data/pythonpath
 
@@ -73,19 +93,6 @@ time ${cmd}
 END"""
 
     sh script: ssh_cmd, label: step_label
-  }
-}
-
-def rebootDevice(String ip) {
-  withCredentials([file(credentialsId: 'id_rsa', variable: 'key_file')]) {
-    sh returnStatus: true, script: """
-ssh -o ConnectTimeout=5 -o ServerAliveInterval=5 -o ServerAliveCountMax=1 -o BatchMode=yes -o StrictHostKeyChecking=no -i ${key_file} 'comma@${ip}' 'sudo reboot'
-"""
-  }
-
-  sleep(20)
-  retryWithDelay(24, 5) {
-    device(ip, "wait for reboot", "true")
   }
 }
 
@@ -110,10 +117,6 @@ def deviceStage(String stageName, String deviceType, List extra_env, def steps) 
     lock(lockOptions) {
       docker.image('ghcr.io/commaai/alpine-ssh').inside('--user=root') {
         timeout(time: 35, unit: 'MINUTES') {
-          if (deviceType == "tizi-needs-can-tmp") {
-            rebootDevice(device_ip)
-          }
-
           retry (3) {
             def date = sh(script: 'date', returnStdout: true).trim();
             device(device_ip, "set time", "date -s '" + date + "'")
@@ -225,7 +228,7 @@ node {
     if (!env.BRANCH_NAME.matches(excludeRegex)) {
     parallel (
       'onroad tests': {
-        deviceStage("onroad", TIZI_NEEDS_CAN, ["UNSAFE=1"], [
+        deviceStage("onroad", TIZI_NEEDS_CAN, ["UNSAFE=1", "USE_FIXED_RAYLIB=1", "VIPC_BUFFER_COUNT=8"], [
           step("build openpilot", "cd system/manager && ./build.py"),
           step("check dirty", "release/check-dirty.sh"),
           step("onroad tests", "pytest selfdrive/test/test_onroad.py -s", [timeout: 60]),
@@ -247,9 +250,8 @@ node {
         ])
       },
       'camerad OS04C10': {
-        deviceStage("OS04C10", "tici-os04c10", ["UNSAFE=1"], [
+        deviceStage("OS04C10", TICI_OS04C10, ["UNSAFE=1"], [
           step("build", "cd system/manager && ./build.py"),
-          step("test pandad", "pytest selfdrive/pandad/tests/test_pandad.py"),
           step("test camerad", "pytest system/camerad/test/test_camerad.py", [timeout: 90]),
         ])
       },

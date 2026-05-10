@@ -197,6 +197,7 @@ class CameraView(Widget):
     self.frame = None
     self.available_streams.clear()
     self.client = None
+    self._target_client = None
 
   def __del__(self):
     self.close()
