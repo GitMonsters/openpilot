@@ -3,6 +3,7 @@ import os
 from openpilot.selfdrive.modeld.helpers import MODELS_DIR, CompileConfig, set_tinygrad_backend_from_compiled_flags
 set_tinygrad_backend_from_compiled_flags()
 
+from tinygrad.device import Device
 from tinygrad.tensor import Tensor
 import time
 import pickle
@@ -47,9 +48,28 @@ class ModelState:
     with open(CompileConfig(cam_w, cam_h, prefix='dm_', prepare_only=True).pkl_path, "rb") as f:
       self.image_warp = pickle.load(f)
 
-  def run(self, buf: VisionBuf, calib: np.ndarray, transform: np.ndarray) -> tuple[np.ndarray, float]:
+    self.warmup()
+
+  def warmup(self):
+    frame = Tensor.zeros(self.frame_buf_params[3], dtype='uint8').contiguous().realize()
+    calib = np.zeros(self.numpy_inputs['calib'].size, dtype=np.float32)
+    transform = np.eye(3, dtype=np.float32)
+
+    st = time.perf_counter()
+    self.run_model(frame, calib, transform)
+    Device.default.synchronize()
+    cloudlog.warning(f"dmonitoringmodeld model warmup took {time.perf_counter() - st:.3f}s")
+
+  def run_model(self, frame: Tensor, calib: np.ndarray, transform: np.ndarray) -> np.ndarray:
     self.numpy_inputs['calib'][0,:] = calib
 
+    self.warp_inputs_np['transform'][:] = transform[:]
+    self.tensor_inputs['input_img'] = self.image_warp(frame, self.warp_inputs['transform'])
+
+    output = self.model_run(**self.tensor_inputs).numpy().flatten()
+    return output
+
+  def run(self, buf: VisionBuf, calib: np.ndarray, transform: np.ndarray) -> tuple[np.ndarray, float]:
     t1 = time.perf_counter()
 
     ptr = buf.data.ctypes.data
@@ -57,11 +77,7 @@ class ModelState:
     if ptr not in self._blob_cache:
       self._blob_cache[ptr] = Tensor.from_blob(ptr, (self.frame_buf_params[3],), dtype='uint8')
 
-    self.warp_inputs_np['transform'][:] = transform[:]
-    self.tensor_inputs['input_img'] = self.image_warp(self._blob_cache[ptr], self.warp_inputs['transform'])
-
-    output = self.model_run(**self.tensor_inputs).numpy().flatten()
-
+    output = self.run_model(self._blob_cache[ptr], calib, transform)
     t2 = time.perf_counter()
     return output, t2 - t1
 

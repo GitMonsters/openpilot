@@ -386,8 +386,8 @@ class TestOnroad:
     ]
     for (s, instant_max, avg_max) in cfgs:
       ts = [getattr(m, s).modelExecutionTime for m in self.msgs[s]]
-      offset = int(SERVICE_LIST[s].frequency * LOG_OFFSET)
-      ts = ts[offset:]
+      # TODO some init can happen in first iteration
+      ts = ts[1:]
       result += f"'{s}' execution time: min  {min(ts):.5f}s\n"
       result += f"'{s}' execution time: max {max(ts):.5f}s\n"
       result += f"'{s}' execution time: mean {np.mean(ts):.5f}s\n"
