@@ -110,12 +110,11 @@ class ModelState:
     self.warmup()
 
   def warmup(self):
-    input_queues, _ = make_input_queues(self.vision_input_shapes, self.policy_input_shapes, self.frame_skip)
     frame = Tensor.zeros(self.frame_buf_params['img'][3], dtype='uint8').contiguous().realize()
     big_frame = Tensor.zeros(self.frame_buf_params['big_img'][3], dtype='uint8').contiguous().realize()
 
     st = time.perf_counter()
-    self.run_policy(**input_queues, frame=frame, big_frame=big_frame)
+    self.run_policy(**self.input_queues, frame=frame, big_frame=big_frame)
     Device.default.synchronize()
     cloudlog.warning(f"modeld model warmup took {time.perf_counter() - st:.3f}s")
 
