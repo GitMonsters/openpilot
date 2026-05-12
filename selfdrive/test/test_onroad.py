@@ -385,12 +385,21 @@ class TestOnroad:
       ("driverStateV2", 0.3, 0.05),
     ]
     for (s, instant_max, avg_max) in cfgs:
-      ts = [getattr(m, s).modelExecutionTime for m in self.msgs[s]]
+      timing_samples = []
+      for i, m in enumerate(self.msgs[s]):
+        msg = getattr(m, s)
+        gpu_time = msg.gpuExecutionTime if s == "driverStateV2" else None
+        timing_samples.append((msg.modelExecutionTime, gpu_time, i, msg.frameId, m.logMonoTime))
+
       offset = int(SERVICE_LIST[s].frequency * LOG_OFFSET)
-      ts = ts[offset:]
+      ts = [sample[0] for sample in timing_samples[offset:]]
       result += f"'{s}' execution time: min  {min(ts):.5f}s\n"
       result += f"'{s}' execution time: max {max(ts):.5f}s\n"
       result += f"'{s}' execution time: mean {np.mean(ts):.5f}s\n"
+      result += f"'{s}' ignored warmup samples: {offset} of {len(timing_samples)}\n"
+      for model_time, gpu_time, idx, frame_id, log_mono_time in sorted(timing_samples, reverse=True)[:5]:
+        gpu_str = "" if gpu_time is None else f", gpu={gpu_time:.5f}s"
+        result += f"'{s}' top sample: model={model_time:.5f}s{gpu_str}, idx={idx}, frame={frame_id}, t={log_mono_time / 1e9:.3f}s\n"
       with subtests.test(s):
         assert max(ts) < instant_max, f"high '{s}' execution time: {max(ts)}"
         assert np.mean(ts) < avg_max, f"high avg '{s}' execution time: {np.mean(ts)}"
