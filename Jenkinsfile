@@ -9,10 +9,15 @@ def retryWithDelay(int maxRetries, int delay, Closure body) {
   throw Exception("Failed after ${maxRetries} retries")
 }
 
+def sshControlPath(String ip) {
+  return "/tmp/jenkins-ssh-${env.BUILD_NUMBER}-${ip.replaceAll(/[^A-Za-z0-9_.-]/, '_')}"
+}
+
 def device(String ip, String step_label, String cmd) {
   withCredentials([file(credentialsId: 'id_rsa', variable: 'key_file')]) {
+    def ssh_options = "-o ConnectTimeout=5 -o ServerAliveInterval=5 -o ServerAliveCountMax=2 -o BatchMode=yes -o StrictHostKeyChecking=no -o ControlMaster=auto -o ControlPersist=10m -o ControlPath=${sshControlPath(ip)} -i ${key_file}"
     def ssh_cmd = """
-ssh -o ConnectTimeout=5 -o ServerAliveInterval=5 -o ServerAliveCountMax=2 -o BatchMode=yes -o StrictHostKeyChecking=no -i ${key_file} 'comma@${ip}' exec /usr/bin/bash <<'END'
+ssh ${ssh_options} 'comma@${ip}' exec /usr/bin/bash <<'END'
 
 set -e
 
